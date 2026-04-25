@@ -2,9 +2,15 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from app.config import settings
 from app.pipeline import run_pipeline
 from app.services.deepseek_client import generate_leadership_report_from_grok
-from app.services.grok_records import fetch_grok_chat_records, fetch_grok_records_by_ids
+from app.services.grok_records import (
+    fetch_grok_chat_records,
+    fetch_grok_records_by_ids,
+    save_leadership_report,
+)
+from app.services.reporter import text_to_pdf_bytes
 
 st.set_page_config(page_title="舆情分析系统", layout="wide")
 st.title("舆情获取 + 分析系统（Python + PostgreSQL）")
@@ -105,12 +111,43 @@ with tab_grok:
                 else:
                     with st.spinner("正在调用 DeepSeek 生成报告（可能需数十秒）…"):
                         report = generate_leadership_report_from_grok(full_rows)
-                    st.write("### 领导参阅报告")
-                    st.markdown(report)
-                    st.download_button(
-                        label="下载为 Markdown",
-                        data=report.encode("utf-8"),
-                        file_name="leadership_report_grok.md",
-                        mime="text/markdown",
-                        key="dl_report",
+                    st.session_state["leadership_report_md"] = report
+                    saved_id = save_leadership_report(
+                        selected_ids,
+                        report,
+                        settings.deepseek_model,
                     )
+                    if saved_id is not None:
+                        st.session_state["leadership_report_saved_id"] = saved_id
+                    else:
+                        st.session_state.pop("leadership_report_saved_id", None)
+                        st.warning(
+                            "报告已生成，但**未写入数据库**。请在 PostgreSQL 中执行 "
+                            "`scripts/grok_leadership_reports.sql` 建表后重试。"
+                        )
+
+        report_md = st.session_state.get("leadership_report_md")
+        if report_md:
+            st.write("### 领导参阅报告")
+            sid = st.session_state.get("leadership_report_saved_id")
+            if sid is not None:
+                st.caption(f"已保存至表 **grok_leadership_reports**，id = `{sid}`。")
+            st.markdown(report_md)
+            pdf_bytes = text_to_pdf_bytes(report_md)
+            c_dl1, c_dl2 = st.columns(2)
+            with c_dl1:
+                st.download_button(
+                    label="下载 Markdown",
+                    data=report_md.encode("utf-8"),
+                    file_name="leadership_report_grok.md",
+                    mime="text/markdown",
+                    key="dl_report_md",
+                )
+            with c_dl2:
+                st.download_button(
+                    label="下载 PDF",
+                    data=pdf_bytes,
+                    file_name="leadership_report_grok.pdf",
+                    mime="application/pdf",
+                    key="dl_report_pdf",
+                )

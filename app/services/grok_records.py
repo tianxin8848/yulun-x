@@ -61,3 +61,37 @@ def fetch_grok_records_by_ids(ids: list[int]) -> list[dict[str, Any]]:
     except Exception:
         return []
     return rows
+
+
+def save_leadership_report(
+    source_grok_ids: list[int],
+    report_body: str,
+    deepseek_model: str = "",
+) -> int | None:
+    """
+    将一次 DeepSeek 生成的领导报告写入 grok_leadership_reports。
+    source_grok_ids 为界面勾选顺序（去重保序）。
+    """
+    from app.config import settings
+    from app.db import SessionLocal
+    from app.models import GrokLeadershipReport
+
+    model = (deepseek_model or settings.deepseek_model or "").strip()
+    ordered_ids = list(dict.fromkeys(int(x) for x in source_grok_ids))
+
+    db = SessionLocal()
+    try:
+        row = GrokLeadershipReport(
+            source_grok_ids=ordered_ids,
+            report_body=report_body,
+            deepseek_model=model,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return int(row.id)
+    except Exception:
+        db.rollback()
+        return None
+    finally:
+        db.close()

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -47,3 +47,15 @@ class Report(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     run = relationship("Run", back_populates="report")
+
+
+class GrokLeadershipReport(Base):
+    """由所选 Grok 问答经 DeepSeek 生成的领导参阅报告（与 grok_chat_records 一对多来源）。"""
+
+    __tablename__ = "grok_leadership_reports"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    source_grok_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    report_body: Mapped[str] = mapped_column(Text, nullable=False)
+    deepseek_model: Mapped[str] = mapped_column(String(128), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
