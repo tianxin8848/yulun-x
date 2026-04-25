@@ -62,27 +62,34 @@
     return /[?？]$/.test(text.trim()) || text.includes('怎么') || text.includes('如何');
   }
 
-  function extractLatestPair() {
+  function extractAllPairs() {
     const messages = collectMessageCandidates();
     if (messages.length < 2) {
-      return null;
+      return [];
     }
 
-    // 从后往前找最后一个“像问题”的文本，再取它后面的第一条作为回答
-    for (let i = messages.length - 2; i >= 0; i -= 1) {
+    const pairs = [];
+    const used = new Set();
+    for (let i = 0; i < messages.length - 1; i += 1) {
       const question = messages[i];
       const answer = messages[i + 1];
       if (!question || !answer) continue;
       if (isQuestionText(question) && answer.length >= MIN_TEXT_LEN) {
-        return { question, answer };
+        const key = `${question}|||${answer}`;
+        if (!used.has(key)) {
+          used.add(key);
+          pairs.push({ question, answer });
+        }
       }
     }
 
-    // 回退策略：直接用最后两条
-    return {
-      question: messages[messages.length - 2],
-      answer: messages[messages.length - 1],
-    };
+    if (pairs.length === 0) {
+      pairs.push({
+        question: messages[messages.length - 2],
+        answer: messages[messages.length - 1],
+      });
+    }
+    return pairs;
   }
 
   function buildPayload(pair) {
@@ -146,24 +153,19 @@
     setTimeout(() => toast.remove(), 2200);
   }
 
-  async function uploadLatest(source = 'manual') {
-    const pair = extractLatestPair();
-    if (!pair) {
-      showToast('未找到可上传的问答', 'err');
-      return;
-    }
-
-    const payload = buildPayload(pair);
-    const fp = fingerprintPayload(payload);
-    if (fingerprintCache.has(fp) && source !== 'manual') {
-      return;
-    }
-
+  async function uploadPairs(pairs, source = 'manual') {
+    let uploaded = 0;
     try {
-      await sendToService(payload, source);
-      fingerprintCache.add(fp);
+      for (const pair of pairs) {
+        const payload = buildPayload(pair);
+        const fp = fingerprintPayload(payload);
+        if (fingerprintCache.has(fp) && source !== 'manual') continue;
+        await sendToService(payload, source);
+        fingerprintCache.add(fp);
+        uploaded += 1;
+      }
       if (source === 'manual') {
-        showToast('最新问答已上传', 'ok');
+        showToast(`已上传 ${uploaded} 条问答`, uploaded > 0 ? 'ok' : 'info');
       }
     } catch (error) {
       console.error('[Grok Upload] failed:', error);
@@ -171,6 +173,61 @@
         showToast('上传失败，请检查后端服务', 'err');
       }
     }
+  }
+
+  async function uploadLatest(source = 'manual') {
+    const pairs = extractAllPairs();
+    if (!pairs.length) {
+      showToast('未找到可上传的问答', 'err');
+      return;
+    }
+    await uploadPairs([pairs[pairs.length - 1]], source);
+  }
+
+  function parseManualSelection(input, total) {
+    const raw = (input || '').trim().toLowerCase();
+    if (!raw || raw === 'latest') {
+      return [total];
+    }
+    if (raw === 'all') {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    if (/^\d+$/.test(raw)) {
+      const n = Math.max(1, Math.min(total, Number(raw)));
+      // 最新 N 条（按时间顺序上传）
+      return Array.from({ length: n }, (_, i) => total - n + 1 + i);
+    }
+    const indexList = raw
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter((x) => Number.isInteger(x) && x >= 1 && x <= total);
+    return Array.from(new Set(indexList)).sort((a, b) => a - b);
+  }
+
+  async function handleManualUpload() {
+    const pairs = extractAllPairs();
+    const total = pairs.length;
+    if (!total) {
+      showToast('未识别到问答', 'err');
+      return;
+    }
+    const userInput = window.prompt(
+      `当前识别到 ${total} 组问答。\n` +
+        '输入规则：\n' +
+        '- 直接回车 / latest => 上传最新 1 组\n' +
+        '- 数字N (如 3) => 上传最新 N 组\n' +
+        '- 逗号序号 (如 1,3,5) => 上传指定序号\n' +
+        '- all => 上传全部',
+      'latest'
+    );
+    if (userInput === null) return;
+    const indexes = parseManualSelection(userInput, total);
+    if (!indexes.length) {
+      showToast('输入无效，未上传', 'err');
+      return;
+    }
+    const selectedPairs = indexes.map((idx) => pairs[idx - 1]);
+    await uploadPairs(selectedPairs, 'manual');
   }
 
   function observeConversation() {
@@ -204,7 +261,7 @@
       'box-shadow:0 8px 24px rgba(0,0,0,0.3)',
     ].join(';');
     btn.addEventListener('click', () => {
-      uploadLatest('manual');
+      handleManualUpload();
     });
     document.body.appendChild(btn);
   }
