@@ -16,6 +16,7 @@
 
   const API_URL = 'http://127.0.0.1:8000/api/grok/messages';
   const MIN_TEXT_LEN = 15;
+  const MIN_QUESTION_LEN = 4;
   const AUTO_UPLOAD_DEBOUNCE_MS = 1500;
   const fingerprintCache = new Set();
   let autoUploadTimer = null;
@@ -29,7 +30,7 @@
   }
 
   function isProbablyNoise(text) {
-    if (!text || text.length < MIN_TEXT_LEN) return true;
+    if (!text) return true;
     const noise = ['查看新帖子', '专注模式', '复制分享链接', '书签', '聊天历史记录', '新聊天', '想法'];
     return noise.includes(text.trim());
   }
@@ -42,6 +43,7 @@
     nodes.forEach((node) => {
       const text = normalizeText(node.innerText);
       if (isProbablyNoise(text)) return;
+      if (text.length < MIN_QUESTION_LEN) return;
       if (text.length > 20000) return;
       if (node.querySelector('button, nav, svg') && text.length < 80) return;
       results.push(text);
@@ -58,38 +60,68 @@
     return deduped;
   }
 
-  function isQuestionText(text) {
-    return /[?？]$/.test(text.trim()) || text.includes('怎么') || text.includes('如何');
+  function detectRoleFromNode(node) {
+    // 关键：按对话框结构识别角色，而不是按问号识别问题
+    if (node.classList.contains('r-1kt6imw')) return 'user';
+    if (node.classList.contains('r-imh66m')) return 'assistant';
+    return 'unknown';
+  }
+
+  function extractDialogueBlocks() {
+    const root = document.querySelector('div[data-testid="primaryColumn"]') || document.body;
+    const nodes = Array.from(root.querySelectorAll('div[dir="ltr"].css-146c3p1'));
+    const blocks = [];
+
+    for (const node of nodes) {
+      const text = normalizeText(node.innerText);
+      if (isProbablyNoise(text)) continue;
+      if (text.length < MIN_QUESTION_LEN) continue;
+      if (text.length > 60000) continue;
+      const role = detectRoleFromNode(node);
+      if (role === 'unknown') continue;
+      blocks.push({ role, text });
+    }
+    return blocks;
   }
 
   function extractAllPairs() {
-    const messages = collectMessageCandidates();
-    if (messages.length < 2) {
-      return [];
+    const blocks = extractDialogueBlocks();
+    if (!blocks.length) {
+      // 回退到旧策略，防止页面结构变化后完全抓不到
+      const messages = collectMessageCandidates();
+      if (messages.length < 2) return [];
+      return [{ question: messages[messages.length - 2], answer: messages[messages.length - 1] }];
     }
 
     const pairs = [];
-    const used = new Set();
-    for (let i = 0; i < messages.length - 1; i += 1) {
-      const question = messages[i];
-      const answer = messages[i + 1];
-      if (!question || !answer) continue;
-      if (isQuestionText(question) && answer.length >= MIN_TEXT_LEN) {
-        const key = `${question}|||${answer}`;
-        if (!used.has(key)) {
-          used.add(key);
-          pairs.push({ question, answer });
+    const seen = new Set();
+    let pendingQuestion = '';
+
+    for (const block of blocks) {
+      if (block.role === 'user') {
+        pendingQuestion = block.text;
+        continue;
+      }
+
+      if (block.role === 'assistant' && pendingQuestion) {
+        const key = `${pendingQuestion}|||${block.text}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          pairs.push({ question: pendingQuestion, answer: block.text });
         }
+        pendingQuestion = '';
       }
     }
 
-    if (pairs.length === 0) {
-      pairs.push({
-        question: messages[messages.length - 2],
-        answer: messages[messages.length - 1],
-      });
+    if (pairs.length) {
+      return pairs;
     }
-    return pairs;
+
+    const fallbackMessages = collectMessageCandidates();
+    if (fallbackMessages.length < 2) {
+      return [];
+    }
+    return [{ question: fallbackMessages[fallbackMessages.length - 2], answer: fallbackMessages[fallbackMessages.length - 1] }];
   }
 
   function buildPayload(pair) {
