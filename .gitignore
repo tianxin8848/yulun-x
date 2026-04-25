@@ -1,0 +1,42 @@
+# 1. 系统自动生成文件
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# 2. 编辑器配置/缓存
+.idea/
+.vscode/
+*.iml
+*.sublime-project
+*.sublime-workspace
+
+# 3. 环境变量/私密配置
+.env
+.env.local
+.env.development.local
+# 例外：保留配置示例文件
+!.env.example
+
+# 4. 依赖包文件夹
+node_modules/
+vendor/
+packages/
+.venv/
+# 5. 编译/打包产物
+dist/
+build/
+out/
+output/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# 6. 日志/临时文件
+*.log
+logs/
+temp/
+tmp/
+*.bak
+*.backup

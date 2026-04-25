@@ -1,0 +1,11 @@
+streamlit
+sqlalchemy
+psycopg2-binary
+python-dotenv
+feedparser
+snownlp
+jieba
+pandas
+plotly
+requests
+reportlab
