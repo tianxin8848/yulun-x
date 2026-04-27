@@ -1,0 +1,6 @@
+cd /Users/xi/Documents/github/4-web/sunday-info
+source .venv/bin/activate
+streamlit run streamlit_app.py
+
+pip install -r requirements.txt
+python3 scripts/grok_ingest_service.py
